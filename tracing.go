@@ -10,7 +10,7 @@ import (
 	"github.com/uber/jaeger-client-go/config"
 )
 
-// InitSpan - initiate the tracing span and set the http response header with X-Request-Id
+// InitSpan initiates the tracing span and set the http response header with X-Request-Id
 func InitSpan(mux *runtime.ServeMux) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var serverSpan opentracing.Span
@@ -73,7 +73,7 @@ func InitSpan(mux *runtime.ServeMux) http.Handler {
 	})
 }
 
-// InitJaeger - helper to initiate an instance of Jaeger Tracer as global tracer, if you need to
+// InitJaeger is the helper to initiate an instance of Jaeger Tracer as global tracer, if you need to
 // customize your tracer, you can do it yourself instead of calling this function
 func InitJaeger(service, samplingServerURL, localAgentHost string, debug bool) (io.Closer, error) {
 	cfg := &config.Configuration{

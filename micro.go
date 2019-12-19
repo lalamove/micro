@@ -26,7 +26,7 @@ import (
 	"google.golang.org/grpc/reflection"
 )
 
-// Service - to represent the microservice
+// Service represents the microservice
 type Service struct {
 	GRPCServer         *grpc.Server
 	HTTPServer         *http.Server
@@ -55,21 +55,21 @@ const (
 	defaultPreShutdownDelay = 1 * time.Second
 )
 
-// ReverseProxyFunc - a callback that the caller should implement to steps to reverse-proxy the HTTP/1 requests to gRPC
+// ReverseProxyFunc is the callback that the caller should implement to steps to reverse-proxy the HTTP/1 requests to gRPC
 type ReverseProxyFunc func(ctx context.Context, mux *runtime.ServeMux, grpcHostAndPort string, opts []grpc.DialOption) error
 
-// HTTPHandlerFunc - http middleware handler function
+// HTTPHandlerFunc is the http middleware handler function
 type HTTPHandlerFunc func(*runtime.ServeMux) http.Handler
 
-// AnnotatorFunc - annotator function is for injecting meta data from http request into gRPC context
+// AnnotatorFunc is the annotator function is for injecting meta data from http request into gRPC context
 type AnnotatorFunc func(context.Context, *http.Request) metadata.MD
 
-// DefaultHTTPHandler - default http handler which will initiate the tracing span and set the http response header with X-Request-Id
+// DefaultHTTPHandler is the default http handler which will initiate the tracing span and set the http response header with X-Request-Id
 func DefaultHTTPHandler(mux *runtime.ServeMux) http.Handler {
 	return InitSpan(mux)
 }
 
-// DefaultAnnotator - pass span info into gRPC context
+// DefaultAnnotator passes span info into gRPC context
 func DefaultAnnotator(ctx context.Context, req *http.Request) metadata.MD {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
@@ -97,7 +97,7 @@ func DefaultAnnotator(ctx context.Context, req *http.Request) metadata.MD {
 	return md
 }
 
-// RequestID - get X-Request-Id from http request header, if it does not exist then generate one
+// RequestID gets X-Request-Id from http request header, if it does not exist then generate one
 func RequestID(req *http.Request) string {
 	id := req.Header.Get("X-Request-Id")
 
@@ -160,7 +160,7 @@ func defaultService() *Service {
 	return &s
 }
 
-// NewService - create a new microservice
+// NewService creates a new microservice
 func NewService(opts ...Option) *Service {
 	s := defaultService()
 
@@ -198,12 +198,12 @@ func NewService(opts ...Option) *Service {
 	return s
 }
 
-// Getpid - get the process id of server
+// Getpid gets the process id of server
 func (s *Service) Getpid() int {
 	return os.Getpid()
 }
 
-// Start - start the microservice with listening on the ports
+// Start starts the microservice with listening on the ports
 func (s *Service) Start(httpPort uint16, grpcPort uint16, reverseProxyFunc ReverseProxyFunc) error {
 
 	// intercept interrupt signals
@@ -321,7 +321,7 @@ func (s *Service) startGRPCGateway(httpPort uint16, grpcPort uint16, reverseProx
 	return s.HTTPServer.ListenAndServe()
 }
 
-// Stop - stop the microservice gracefully
+// Stop stops the microservice gracefully
 func (s *Service) Stop() {
 	// disable keep-alives on existing connections
 	s.HTTPServer.SetKeepAlivesEnabled(false)
