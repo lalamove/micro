@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/handlers"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
+	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	grpc_validator "github.com/grpc-ecosystem/go-grpc-middleware/validator"
 	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/grpc-ecosystem/grpc-gateway/runtime"
@@ -144,8 +145,8 @@ func defaultService() *Service {
 	s.unaryInterceptors = append(s.unaryInterceptors, grpc_validator.UnaryServerInterceptor())
 
 	// install panic handler
-	s.streamInterceptors = append(s.streamInterceptors, StreamPanicHandler)
-	s.unaryInterceptors = append(s.unaryInterceptors, UnaryPanicHandler)
+	s.streamInterceptors = append(s.streamInterceptors, grpc_recovery.StreamServerInterceptor())
+	s.unaryInterceptors = append(s.unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
 
 	// add /metrics HTTP/1 endpoint
 	routeMetrics := Route{
@@ -166,7 +167,7 @@ func NewService(opts ...Option) *Service {
 
 	s.apply(opts...)
 
-	// default tracer is NoopTracer, you need to use an acutal tracer for tracing
+	// default tracer is NoopTracer, you need to use an actual tracer for tracing
 	tracer := opentracing.GlobalTracer()
 
 	// default dial option is using insecure connection
