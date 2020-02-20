@@ -36,6 +36,7 @@ type Service struct {
 	annotators         []AnnotatorFunc
 	redoc              *RedocOpts
 	staticDir          string
+	muxOptions         []runtime.ServeMuxOption
 	mux                *runtime.ServeMux
 	routes             []Route
 	streamInterceptors []grpc.StreamServerInterceptor
@@ -185,6 +186,23 @@ func NewService(opts ...Option) *Service {
 		s.unaryInterceptors = append(s.unaryInterceptors, otgrpc.OpenTracingServerInterceptor(tracer))
 	}
 
+	// init gateway mux
+	// refer: https://github.com/grpc-ecosystem/grpc-gateway/blob/master/docs/_docs/customizingyourgateway.md
+	if len(s.muxOptions) == 0 {
+		s.muxOptions = append(s.muxOptions, runtime.WithMarshalerOption(
+			runtime.MIMEWildcard,
+			&runtime.JSONPb{EmitDefaults: true},
+		))
+	}
+
+	s.muxOptions = append(s.muxOptions, runtime.WithProtoErrorHandler(s.errorHandler))
+
+	for _, annotator := range s.annotators {
+		s.muxOptions = append(s.muxOptions, runtime.WithMetadata(annotator))
+	}
+
+	s.mux = runtime.NewServeMux(s.muxOptions...)
+
 	s.grpcServerOptions = append(s.grpcServerOptions, grpc_middleware.WithStreamServerChain(s.streamInterceptors...))
 	s.grpcServerOptions = append(s.grpcServerOptions, grpc_middleware.WithUnaryServerChain(s.unaryInterceptors...))
 
@@ -262,19 +280,6 @@ func (s *Service) startGRPCServer(grpcPort uint16) error {
 }
 
 func (s *Service) startGRPCGateway(httpPort uint16, grpcPort uint16, reverseProxyFunc ReverseProxyFunc) error {
-	var muxOptions []runtime.ServeMuxOption
-	muxOptions = append(muxOptions, runtime.WithMarshalerOption(
-		runtime.MIMEWildcard,
-		&runtime.JSONPb{OrigName: true, EmitDefaults: true},
-	))
-	muxOptions = append(muxOptions, runtime.WithProtoErrorHandler(s.errorHandler))
-
-	for _, annotator := range s.annotators {
-		muxOptions = append(muxOptions, runtime.WithMetadata(annotator))
-	}
-
-	s.mux = runtime.NewServeMux(muxOptions...)
-
 	if s.redoc.Up {
 		// add /docs HTTP/1 endpoint
 		routeDocs := Route{
