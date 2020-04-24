@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -64,10 +65,10 @@ func TestNewService(t *testing.T) {
 
 	s := NewService(
 		Redoc(redoc),
-		Debug(true),
 		RouteOpt(route),
 		ShutdownFunc(shutdownFunc),
 		PreShutdownDelay(0),
+		WithLogger(LoggerFunc(log.Printf)),
 	)
 
 	go func() {

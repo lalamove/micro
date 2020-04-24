@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -41,13 +40,13 @@ type Service struct {
 	routes             []Route
 	streamInterceptors []grpc.StreamServerInterceptor
 	unaryInterceptors  []grpc.UnaryServerInterceptor
-	debug              bool
 	shutdownFunc       func()
 	shutdownTimeout    time.Duration
 	preShutdownDelay   time.Duration
 	interruptSignals   []os.Signal
 	grpcServerOptions  []grpc.ServerOption
 	grpcDialOptions    []grpc.DialOption
+	logger             Logger
 }
 
 const (
@@ -61,14 +60,17 @@ const (
 type ReverseProxyFunc func(ctx context.Context, mux *runtime.ServeMux, grpcHostAndPort string, opts []grpc.DialOption) error
 
 // HTTPHandlerFunc is the http middleware handler function
-type HTTPHandlerFunc func(*runtime.ServeMux) http.Handler
+type HTTPHandlerFunc func(*Service) http.Handler
 
 // AnnotatorFunc is the annotator function is for injecting meta data from http request into gRPC context
 type AnnotatorFunc func(context.Context, *http.Request) metadata.MD
 
+// refer: https://github.com/grpc-ecosystem/grpc-gateway/blob/master/docs/_docs/customizingyourgateway.md
+var defaultMuxOption = runtime.WithMarshalerOption(runtime.MIMEWildcard, &runtime.JSONPb{EmitDefaults: true})
+
 // DefaultHTTPHandler is the default http handler which will initiate the tracing span and set the http response header with X-Request-Id
-func DefaultHTTPHandler(mux *runtime.ServeMux) http.Handler {
-	return InitSpan(mux)
+func DefaultHTTPHandler(s *Service) http.Handler {
+	return s.InitSpan()
 }
 
 // DefaultAnnotator passes span info into gRPC context
@@ -121,18 +123,14 @@ func defaultService() *Service {
 	s.shutdownFunc = func() {}
 	s.shutdownTimeout = defaultShutdownTimeout
 	s.preShutdownDelay = defaultPreShutdownDelay
+	s.logger = dummyLogger
 
 	s.redoc = &RedocOpts{
 		Up: false,
 	}
 
 	// default interrupt signals to catch, you can use InterruptSignal option to append more
-	s.interruptSignals = []os.Signal{
-		syscall.SIGSTOP,
-		syscall.SIGINT,
-		syscall.SIGTERM,
-		syscall.SIGQUIT,
-	}
+	s.interruptSignals = InterruptSignals
 
 	s.streamInterceptors = []grpc.StreamServerInterceptor{}
 	s.unaryInterceptors = []grpc.UnaryServerInterceptor{}
@@ -148,6 +146,9 @@ func defaultService() *Service {
 	// install panic handler
 	s.streamInterceptors = append(s.streamInterceptors, grpc_recovery.StreamServerInterceptor())
 	s.unaryInterceptors = append(s.unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
+
+	// apply default marshaler option for mux, can be replaced by using MuxOption
+	s.muxOptions = append(s.muxOptions, defaultMuxOption)
 
 	// add /metrics HTTP/1 endpoint
 	routeMetrics := Route{
@@ -177,24 +178,10 @@ func NewService(opts ...Option) *Service {
 	}
 
 	// install open tracing interceptor
-	if s.debug {
-		SetLogger(jaeger.StdLogger)
-		s.streamInterceptors = append(s.streamInterceptors, otgrpc.OpenTracingStreamServerInterceptor(tracer, otgrpc.LogPayloads()))
-		s.unaryInterceptors = append(s.unaryInterceptors, otgrpc.OpenTracingServerInterceptor(tracer, otgrpc.LogPayloads()))
-	} else {
-		s.streamInterceptors = append(s.streamInterceptors, otgrpc.OpenTracingStreamServerInterceptor(tracer))
-		s.unaryInterceptors = append(s.unaryInterceptors, otgrpc.OpenTracingServerInterceptor(tracer))
-	}
+	s.streamInterceptors = append(s.streamInterceptors, otgrpc.OpenTracingStreamServerInterceptor(tracer))
+	s.unaryInterceptors = append(s.unaryInterceptors, otgrpc.OpenTracingServerInterceptor(tracer))
 
 	// init gateway mux
-	// refer: https://github.com/grpc-ecosystem/grpc-gateway/blob/master/docs/_docs/customizingyourgateway.md
-	if len(s.muxOptions) == 0 {
-		s.muxOptions = append(s.muxOptions, runtime.WithMarshalerOption(
-			runtime.MIMEWildcard,
-			&runtime.JSONPb{EmitDefaults: true},
-		))
-	}
-
 	s.muxOptions = append(s.muxOptions, runtime.WithProtoErrorHandler(s.errorHandler))
 
 	for _, annotator := range s.annotators {
@@ -235,13 +222,13 @@ func (s *Service) Start(httpPort uint16, grpcPort uint16, reverseProxyFunc Rever
 
 	// start gRPC server
 	go func() {
-		Logger().Infof("Starting gPRC server listening on %d", grpcPort)
+		s.logger.Printf("Starting gPRC server listening on %d", grpcPort)
 		errChan1 <- s.startGRPCServer(grpcPort)
 	}()
 
 	// start HTTP/1.0 gateway server
 	go func() {
-		Logger().Infof("Starting http server listening on %d", httpPort)
+		s.logger.Printf("Starting http server listening on %d", httpPort)
 		errChan2 <- s.startGRPCGateway(httpPort, grpcPort, reverseProxyFunc)
 	}()
 
@@ -257,7 +244,7 @@ func (s *Service) Start(httpPort uint16, grpcPort uint16, reverseProxyFunc Rever
 
 	// if we received an interrupt signal
 	case sig := <-sigChan:
-		Logger().Infof("Interrupt signal received: %v", sig)
+		s.logger.Printf("Interrupt signal received: %v", sig)
 		s.Stop()
 		return nil
 	}
@@ -321,7 +308,7 @@ func (s *Service) startGRPCGateway(httpPort uint16, grpcPort uint16, reverseProx
 	})
 
 	s.HTTPServer.Addr = fmt.Sprintf(":%d", httpPort)
-	s.HTTPServer.Handler = handlers.RecoveryHandler()(s.httpHandler(s.mux))
+	s.HTTPServer.Handler = handlers.RecoveryHandler()(s.httpHandler(s))
 	s.HTTPServer.RegisterOnShutdown(s.shutdownFunc)
 
 	return s.HTTPServer.ListenAndServe()
@@ -334,7 +321,7 @@ func (s *Service) Stop() {
 
 	// we wait for a duration of preShutdownDelay for running goroutines to finish their jobs
 	if s.preShutdownDelay > 0 {
-		Logger().Infof("Waiting for %v before shutdown starts", s.preShutdownDelay)
+		s.logger.Printf("Waiting for %v before shutdown starts", s.preShutdownDelay)
 		time.Sleep(s.preShutdownDelay)
 	}
 

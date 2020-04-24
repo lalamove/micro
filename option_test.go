@@ -102,5 +102,5 @@ func TestMuxOption(t *testing.T) {
 		)),
 	)
 
-	assert.Len(t, s.muxOptions, 3)
+	assert.Len(t, s.muxOptions, 4)
 }

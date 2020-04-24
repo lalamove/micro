@@ -4,14 +4,13 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/grpc-ecosystem/grpc-gateway/runtime"
 	opentracing "github.com/opentracing/opentracing-go"
 	jaeger "github.com/uber/jaeger-client-go"
 	"github.com/uber/jaeger-client-go/config"
 )
 
 // InitSpan initiates the tracing span and set the http response header with X-Request-Id
-func InitSpan(mux *runtime.ServeMux) http.Handler {
+func (s *Service) InitSpan() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var serverSpan opentracing.Span
 
@@ -28,16 +27,16 @@ func InitSpan(mux *runtime.ServeMux) http.Handler {
 		var methodName = r.Method + " " + r.URL.Path
 		if err != nil {
 			// Found no span in headers, start a new span as root span
-			Logger().Infof(err.Error())
+			s.logger.Printf(err.Error())
 			for k, h := range r.Header {
 				for _, v := range h {
-					Logger().Infof("Header: %s - %s", k, v)
+					s.logger.Printf("Header: %s - %s", k, v)
 				}
 			}
 			serverSpan = opentracing.StartSpan(methodName)
 		} else {
 			// Create span as a child of parent context
-			Logger().Infof("Found parent span, start a child span: " + methodName)
+			s.logger.Printf("Found parent span, start a child span: %s", methodName)
 			serverSpan = opentracing.StartSpan(
 				methodName,
 				opentracing.ChildOf(wireContext),
@@ -50,11 +49,11 @@ func InitSpan(mux *runtime.ServeMux) http.Handler {
 
 		var footprint string
 		if footprint = serverSpan.BaggageItem("footprint"); footprint != "" {
-			Logger().Infof("Found baggage item footprint in span: " + footprint)
+			s.logger.Printf("Found baggage item footprint in span: %s", footprint)
 			serverSpan.SetTag("footprint", footprint)
 		} else {
 			footprint = RequestID(r)
-			Logger().Infof("No baggage item footprint found in span, try to get from X-Request-Id: " + footprint)
+			s.logger.Printf("No baggage item footprint found in span, try to get from X-Request-Id: %s", footprint)
 			serverSpan.SetBaggageItem("footprint", footprint)
 			serverSpan.SetTag("footprint", footprint)
 		}
@@ -63,10 +62,10 @@ func InitSpan(mux *runtime.ServeMux) http.Handler {
 		w.Header().Set("X-Request-Id", footprint)
 
 		// We are passing the span as an item in Go context
-		Logger().Infof("Passing span into context: %+v", serverSpan)
+		s.logger.Printf("Passing span into context: %+v", serverSpan)
 		var ctx = opentracing.ContextWithSpan(r.Context(), serverSpan)
 
-		mux.ServeHTTP(w, r.WithContext(ctx))
+		s.mux.ServeHTTP(w, r.WithContext(ctx))
 
 		// Span needs to be finished in order to report it to Jaeger collector
 		serverSpan.Finish()

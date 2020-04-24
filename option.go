@@ -15,13 +15,6 @@ import (
 // http://dave.cheney.net/2014/10/17/functional-options-for-friendly-apis
 type Option func(s *Service)
 
-// Debug - return an Option to set the service to debug mode or not
-func Debug(flag bool) Option {
-	return func(s *Service) {
-		s.debug = flag
-	}
-}
-
 // StaticDir returns an Option to set the staticDir
 func StaticDir(staticDir string) Option {
 	return func(s *Service) {
@@ -133,6 +126,13 @@ func MuxOption(muxOption runtime.ServeMuxOption) Option {
 func WithHTTPServer(server *http.Server) Option {
 	return func(s *Service) {
 		s.HTTPServer = server
+	}
+}
+
+// WithLogger uses the provided logger
+func WithLogger(logger Logger) Option {
+	return func(s *Service) {
+		s.logger = logger
 	}
 }
 
